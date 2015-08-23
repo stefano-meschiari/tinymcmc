@@ -1,7 +1,7 @@
 .PHONY: clean
 
 CC=cc
-CFLAGS=-g3
+CFLAGS=-g3 -std=c99
 AR=ar
 ARFLAGS=rcs
 

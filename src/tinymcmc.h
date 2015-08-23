@@ -14,9 +14,22 @@
 #ifdef	__cplusplus
 extern "C" {
 #endif
+#include "stdlib.h"
+#include "stdio.h"
+#include "../randamu/include/rng.h"    
 
 #define TM_MCMC_BASE 0  /*< The base Metropolis-Hastings algorithm */
 #define TM_MCMC_PARALLEL_TEMPERING 1 /*< Like base, but with parallel tempering */
+
+#define INVALID_NUMBER (NAN)    
+#define IS_FINITE(x) (!(isnan(x) || isinf(x)))
+#define TM_STOP -1 /* Stop the MCMC algorithm */    
+#define TM_OK 0 /* No error */
+#define TM_INFINITY_ENCOUNTERED 1 /* An infinity or NaN were encountered */
+#define MIN(x, y) ((x) < (y) ? x : y)
+#define MAX(x, y) ((x) > (y) ? x : y)    
+    typedef int tm_error;
+    typedef int tm_type;
 
     typedef struct {
         /**
@@ -24,7 +37,9 @@ extern "C" {
          */
         double* v;
         int len;
-    } tm_array;
+        int capacity;
+    }
+    tm_array;
 
     typedef struct {
         /**
@@ -32,11 +47,15 @@ extern "C" {
          */
         int id;
         int length;
-        int capacity;
-        double** values;
-        double* log_likelihood;
+        int n;
+        tm_array* values;
+        tm_array** log_likelihood;
         tm_array* steps;
         tm_array* position;
+        double merit;
+        tm_array* next;
+        double beta;
+        rd_rng rng;
     } tm_chain;
 
     typedef struct {
@@ -44,26 +63,29 @@ extern "C" {
 
     struct _tm_functions;
     typedef struct _tm_functions tm_functions;
+    struct _tm_options;
+    typedef struct _tm_options tm_options;
 
     typedef struct {
         /**
          * This struct contains the current state of MCMC.
          */
         int nchains;
-        tm_chain* chains;
+        tm_chain** chains;
         tm_statistics* stats;
         tm_functions* functions;
+        tm_options* options;
         void* user;
     } tm_state;
 
     struct _tm_prior;
     typedef struct _tm_prior tm_prior;
 
-    typedef double (*tm_likelihood)(tm_array*, tm_chain*, void*);
+    typedef double (*tm_likelihood)(tm_array*, tm_state*);
     /*< The likelihood function. */
-    typedef double (*tm_function)(double, tm_prior*, tm_state*);
-    /*< A generic function. */
-    typedef double (*tm_proposal)(tm_array*, tm_array*, tm_state*);
+    typedef double (*tm_prior_function)(double, tm_prior*, tm_state*);
+    /*< A prior function. */
+    typedef void (*tm_proposal)(tm_array*, tm_array*, tm_state*, tm_chain*);
     /*< A proposal function. */
     typedef int (*tm_callback)(tm_state*);
 
@@ -76,7 +98,7 @@ extern "C" {
         double min;
         double max;
         void* user;
-        tm_function prior_function;
+        tm_prior_function prior_function;
         double* extra;
     };
 
@@ -92,11 +114,15 @@ extern "C" {
         tm_array* steps;
         /**< Initial steps for each parameter; pass NULL to automatically calculate,
          * based on goal acceptance rate */
-        tm_prior* priors;
+        tm_prior** priors;
         /**< Prior functions, specified for each parameter (required) */
+        tm_proposal* proposal;
+        /**< Proposal function */
+        tm_callback* callback;
+        /**< A callback. */
     };
 
-    typedef struct {
+    struct _tm_options {
         int chains;
         /**< Number of chains to use to check convergence on */
         double acceptance_rate_goal;
@@ -105,15 +131,35 @@ extern "C" {
         /**< Number of steps to discard at the beginning */
         int discard;
         /**< Number of steps to discard to minimize correlations */
-    } tm_base_options;
+        int exchanges;
+        /**< For PT, how often to try an exchange */
+    };
 
 
-    tm_prior* tm_new_prior(tm_function function, double min, double max, void* user);
+    /* Prior functions */
+    tm_prior* tm_new_prior(tm_prior_function function, double min, double max, void* user);
     void tm_free_prior(tm_prior* prior);
 
     tm_prior* tm_uniform_prior(double min, double max);
     tm_prior* tm_modified_jeffreys_prior(double max, double a);
     tm_prior* tm_jeffreys_prior(double min, double max);
+
+    /* Proposal functions */
+    void tm_gaussian_gibbs1_proposal(tm_array* x0, tm_array* x1, tm_state* state, tm_chain* chain);
+
+    /* Initialize algorithm */
+    tm_state* tm_init(int type, tm_functions* functions, tm_options* options,
+            tm_error* error);
+    void tm_free(tm_state* state);
+
+    /* Read/write state */
+    tm_error tm_write(FILE* out, tm_state* state);
+    tm_state* tm_read(FILE* in, tm_error* error);
+
+    /* Actions */
+    int tm_burn_in(tm_state* state, tm_error* error);
+    int tm_run(tm_state* state, int steps, tm_error* error);
+
 #ifdef	__cplusplus
 }
 #endif
