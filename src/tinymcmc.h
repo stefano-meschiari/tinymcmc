@@ -26,6 +26,8 @@ extern "C" {
 #define TM_STOP -1 /* Stop the MCMC algorithm */    
 #define TM_OK 0 /* No error */
 #define TM_INFINITY_ENCOUNTERED 1 /* An infinity or NaN were encountered */
+
+#define TM_CRITICAL_ERROR 20
 #define MIN(x, y) ((x) < (y) ? x : y)
 #define MAX(x, y) ((x) > (y) ? x : y)    
     typedef int tm_error;
@@ -42,20 +44,25 @@ extern "C" {
     tm_array;
 
     typedef struct {
+        tm_array* x;
+        double log_likelihood;
+        double log_posterior;
+    } tm_position;
+
+    typedef struct {
         /**
          *  This contains the parameter values for each chain. 
          */
         int id;
         int length;
-        int n;
-        tm_array* values;
-        tm_array** log_likelihood;
+        tm_array** values;
+        tm_array* log_likelihood;
+        tm_array* log_posterior;
         tm_array* steps;
-        tm_array* position;
-        double merit;
-        tm_array* next;
+        tm_position* position;
+        tm_position* next;
         double beta;
-        rd_rng rng;
+        rd_rng* rng;
     } tm_chain;
 
     typedef struct {
@@ -70,12 +77,15 @@ extern "C" {
         /**
          * This struct contains the current state of MCMC.
          */
+        int type;
         int nchains;
+        int nparameters;
         tm_chain** chains;
         tm_statistics* stats;
         tm_functions* functions;
         tm_options* options;
         void* user;
+        int flags;
     } tm_state;
 
     struct _tm_prior;
@@ -90,7 +100,6 @@ extern "C" {
     typedef int (*tm_callback)(tm_state*);
 
     /*< A callback function. */
-
     struct _tm_prior {
         /**
          * A prior function, with limits [min:max] (inclusive)
@@ -107,13 +116,8 @@ extern "C" {
          * This struct contains the core functions needed by
          * the MCMC algorithm.
          */
-        tm_array* parameters;
-        /**< Starting values for parameters; pass NULL to randomly initialize  */
         tm_likelihood log_likelihood;
         /**< The likelihood function (required) */
-        tm_array* steps;
-        /**< Initial steps for each parameter; pass NULL to automatically calculate,
-         * based on goal acceptance rate */
         tm_prior** priors;
         /**< Prior functions, specified for each parameter (required) */
         tm_proposal* proposal;
@@ -123,7 +127,7 @@ extern "C" {
     };
 
     struct _tm_options {
-        int chains;
+        int nchains;
         /**< Number of chains to use to check convergence on */
         double acceptance_rate_goal;
         /**< Goal acceptance rate (used to determine steps) */
@@ -133,22 +137,32 @@ extern "C" {
         /**< Number of steps to discard to minimize correlations */
         int exchanges;
         /**< For PT, how often to try an exchange */
+        uint32_t seed;
+        /**< A user-defined pointer */
+        void* user;
     };
 
 
     /* Prior functions */
-    tm_prior* tm_new_prior(tm_prior_function function, double min, double max, void* user);
-    void tm_free_prior(tm_prior* prior);
+    tm_prior* tm_prior_new(tm_prior_function function, double min, double max, void* user);
+    void tm_prior_free(tm_prior* prior);
 
-    tm_prior* tm_uniform_prior(double min, double max);
-    tm_prior* tm_modified_jeffreys_prior(double max, double a);
-    tm_prior* tm_jeffreys_prior(double min, double max);
+    tm_prior* tm_prior_uniform(double min, double max);
+    tm_prior* tm_prior_modified_jeffreys(double max, double a);
+    tm_prior* tm_prior_jeffreys(double min, double max);
+
+    /* Options */
+    tm_options* tm_options_new(int nparameters);
+    void tm_options_free(tm_options* options);
 
     /* Proposal functions */
-    void tm_gaussian_gibbs1_proposal(tm_array* x0, tm_array* x1, tm_state* state, tm_chain* chain);
+    void tm_proposal_gaussian_gibbs1(tm_position* x0, tm_position* x1, tm_state* state, tm_chain* chain);
 
     /* Initialize algorithm */
-    tm_state* tm_init(int type, tm_functions* functions, tm_options* options,
+    tm_state* tm_new(int type, int nparameters,
+            tm_functions* functions,
+            tm_array* steps,
+            tm_options* options,
             tm_error* error);
     void tm_free(tm_state* state);
 
@@ -157,8 +171,19 @@ extern "C" {
     tm_state* tm_read(FILE* in, tm_error* error);
 
     /* Actions */
+    void tm_set_position(tm_state* state, int chain, double* x);
+    void tm_set_seed(tm_state* state, int chain, uint32_t seed);
+
     int tm_burn_in(tm_state* state, tm_error* error);
     int tm_run(tm_state* state, int steps, tm_error* error);
+
+    /* Array allocation */
+    tm_array* tm_array_new(double* array, const int len);
+    void tm_array_free(tm_array* array);
+    double tm_array_push(tm_array* array, const double v);
+    tm_array* tm_array_clone(const tm_array* array);
+    tm_array* tm_array_of(const int len, const double value);
+
 
 #ifdef	__cplusplus
 }
