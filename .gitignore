@@ -2,3 +2,4 @@ nbproject
 .Rhistory
 *.a
 *.o
+tests/*.txt
